@@ -206,7 +206,10 @@ dev-up:
 		--name $(KIND_CLUSTER) \
 		--config zarf/k8s/dev/kind-config.yaml
 
-	kubectl wait --timeout=120s --namespace=local-path-storage --for=condition=Available deployment/local-path-provisioner
+	kubectl wait deployment/local-path-provisioner \
+		--timeout 120s \
+		--namespace local-path-storage \
+		--for condition=Available
 
 	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)
 	kind load docker-image $(GRAFANA) --name $(KIND_CLUSTER)
@@ -248,10 +251,18 @@ dev-apply:
 	kustomize build zarf/k8s/dev/promtail | kubectl apply -f -
 
 	kustomize build zarf/k8s/dev/database | kubectl apply -f -
-	kubectl rollout status --namespace=$(NAMESPACE) --watch --timeout=120s sts/database
+
+	kubectl rollout status sts/database \
+		--namespace $(NAMESPACE) \
+		--watch \
+		--timeout 120s
 
 	kustomize build zarf/k8s/dev/sales | kubectl apply -f -
-	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(APP) --timeout=120s --for=condition=Ready
+	kubectl wait pods \
+		--namespace=$(NAMESPACE) \
+		--selector app=$(APP) \
+		--timeout=120s \
+		--for=condition=Ready
 
 dev-restart:
 	kubectl rollout restart deployment $(APP) --namespace=$(NAMESPACE)
@@ -261,12 +272,13 @@ dev-update: all dev-load dev-restart
 dev-update-apply: all dev-load dev-apply
 
 dev-logs:
-	kubectl logs --namespace=$(NAMESPACE) -l app=$(APP) --all-containers=true -f --tail=100 --max-log-requests=6 | go run app/tooling/logfmt/main.go -service=$(SERVICE_NAME)
+	kubectl logs --namespace $(NAMESPACE) -l app=$(APP) --all-containers -f --tail 100 --max-log-requests 6 | \
+		go run app/tooling/logfmt/main.go -service=$(SERVICE_NAME)
 
 # ------------------------------------------------------------------------------
 
 dev-logs-init:
-	kubectl logs --namespace=$(NAMESPACE) -l app=$(APP) -f --tail=100 -c init-migrate-seed
+	kubectl logs --namespace $(NAMESPACE) -l app=$(APP) -f --tail 100 -c init-migrate-seed
 
 dev-describe-node:
 	kubectl describe node
@@ -321,7 +333,8 @@ dev-events-warn:
 	kubectl get ev --field-selector type=Warning --sort-by metadata.creationTimestamp
 
 dev-shell:
-	kubectl exec --namespace=$(NAMESPACE) -it $(shell kubectl get pods --namespace=$(NAMESPACE) | grep sales | cut -c1-26) --container sales-api -- /bin/sh
+	$(eval POD := $(shell kubectl get pods --namespace $(NAMESPACE) | grep sales | cut -c1-26))
+	kubectl exec --namespace $(NAMESPACE) -it $(POD) --container sales-api -- /bin/sh
 
 dev-database-restart:
 	kubectl rollout restart statefulset database --namespace=$(NAMESPACE)
@@ -330,10 +343,12 @@ dev-database-restart:
 # Administration
 
 migrate:
-	export SALES_DB_HOST=localhost; go run app/tooling/sales-admin/main.go migrate
+	export SALES_DB_HOST=localhost; \
+		go run app/tooling/sales-admin/main.go migrate
 
 seed: migrate
-	export SALES_DB_HOST=localhost; go run app/tooling/sales-admin/main.go seed
+	export SALES_DB_HOST=localhost; \
+ 		go run app/tooling/sales-admin/main.go seed
 
 pgcli:
 	pgcli postgresql://postgres:postgres@localhost
@@ -345,7 +360,10 @@ readiness:
 	curl -il http://localhost:3000/v1/readiness
 
 token-gen:
-	export SALES_DB_HOST=localhost; go run app/tooling/sales-admin/main.go gentoken 5cf37266-3473-4006-984f-9325122678b7 54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
+	export SALES_DB_HOST=localhost; \
+		go run app/tooling/sales-admin/main.go gentoken \
+			5cf37266-3473-4006-984f-9325122678b7 \
+			54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 docs:
 	go run app/tooling/docs/main.go --browser
@@ -394,18 +412,27 @@ test122: test-only122
 # Hitting endpoints
 
 token:
-	curl -il --user "admin@example.com:gophers" http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
+	curl -il \
+		--user "admin@example.com:gophers" \
+		http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 # export TOKEN="COPY TOKEN STRING FROM LAST CALL"
 
 users:
-	curl -il -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+	curl -il \
+		-H "Authorization: Bearer ${TOKEN}" \
+		"http://localhost:3000/v1/users?page=1&rows=2"
 
 load:
-	hey -m GET -c 100 -n 1000 -H "Authorization: Bearer ${TOKEN}" "http://localhost:3000/v1/users?page=1&rows=2"
+	hey -m GET -c 100 -n 1000 \
+		-H "Authorization: Bearer ${TOKEN}" \
+		"http://localhost:3000/v1/users?page=1&rows=2"
 
 otel-test:
-	curl -il -H "Traceparent: 00-918dd5ecf264712262b68cf2ef8b5239-896d90f23f69f006-01" --user "admin@example.com:gophers" http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
+	curl -il \
+		-H "Traceparent: 00-918dd5ecf264712262b68cf2ef8b5239-896d90f23f69f006-01" \
+		--user "admin@example.com:gophers" \
+		http://localhost:3000/v1/users/token/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 # ==============================================================================
 # Modules support
@@ -440,13 +467,16 @@ run:
 	go run app/services/sales-api/main.go | go run app/tooling/logfmt/main.go
 
 run-help:
-	go run app/services/sales-api/main.go --help | go run app/tooling/logfmt/main.go
+	go run app/services/sales-api/main.go --help | \
+		go run app/tooling/logfmt/main.go
 
 curl:
 	curl -il http://localhost:3000/v1/hack
 
 curl-auth:
-	curl -il -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/hackauth
+	curl -il -H \
+		"Authorization: Bearer ${TOKEN}" \
+		http://localhost:3000/v1/hackauth
 
 load-hack:
 	hey -m GET -c 100 -n 100000 "http://localhost:3000/v1/hack"
@@ -476,16 +506,26 @@ dev-talk-up:
 		--name $(KIND_CLUSTER) \
 		--config zarf/k8s/dev/kind-config.yaml
 
-	kubectl wait --timeout=120s --namespace=local-path-storage --for=condition=Available deployment/local-path-provisioner
+	kubectl wait deployment/local-path-provisioner \
+		--timeout 120s \
+		--namespace local-path-storage \
+		--for condition=Available
 
 	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)	
 
 dev-talk-apply:
 	kustomize build zarf/k8s/dev/database | kubectl apply -f -
-	kubectl rollout status --namespace=$(NAMESPACE) --watch --timeout=120s sts/database
+	kubectl rollout status sts/database \
+		--namespace $(NAMESPACE) \
+		--watch \
+		--timeout 120s
 
 	kustomize build zarf/k8s/dev/sales | kubectl apply -f -
-	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(APP) --timeout=120s --for=condition=Ready
+	kubectl wait pods \
+		--namespace $(NAMESPACE) \
+		--selector app=$(APP) \
+		--timeout 120s \
+		--for condition=Ready
 
 dev-talk-build: all dev-load dev-talk-apply
 
